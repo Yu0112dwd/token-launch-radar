@@ -1,0 +1,226 @@
+# Token Launch Radar — Methodology (token-radar-01)
+
+Bounty: **"Build the best token launch radar"**, slug `token-radar-01`.
+This document describes exactly how `board.json` and `dossier.json` were built
+from DefiLlama data. Nothing in this build was submitted, registered, or paid
+for; no private key, seed phrase, password, or API key was used.
+
+> **Not financial advice.** Implied values below are estimates from a simple
+> comparables proxy, not predictions that a token will launch or reach any
+> valuation. Do your own research before using any protocol.
+
+## 1. Data source
+
+- **Source:** DefiLlama public API, `https://api.llama.fi/protocols` (no key).
+- **Fetched:** 2026-11-24T12:30:40Z (UTC). `fetchedAt` is recorded in every
+  board row, in `dossier.json`, and in `data/raw_protocols.json`.
+- **Total protocols counted:** 9,100.
+- **Files:** `data/build_board.py` (the reproducible builder — re-running it
+  on the saved pull reproduces `board.json` / `dossier.json` exactly),
+  `data/raw_protocols.json` (trimmed copy of the pull, 3.9 MB; logo and
+  description fields dropped), `data/raw_full.json` (the untrimmed pull,
+  kept for audit).
+- **Important limitation — no sealed kit snapshot:** the bounty kit's sealed
+  snapshot was not available for this build (and was not downloaded), so the
+  watchlist is a **fresh DefiLlama pull from 2026-11-24, not the kit's sealed
+  snapshot**. Results will differ from any entry built on the sealed snapshot.
+  Likewise `vendor/makefun-board.ts` from the kit is **missing** — it was not
+  downloaded and not invented. This document covers the data layer
+  (`board.json`, `dossier.json`, `data/`); the dashboard is in `dashboard/`
+  and the program that packages the entry is `main.ts`.
+
+## 2. What counts as "already has a token" (token evidence)
+
+A protocol is treated as **already tokenized** — and excluded — if **any** of
+these strong signals is present in the DefiLlama record:
+
+| Signal | Rule |
+|---|---|
+| `symbol` | present and not `"-"` and not null |
+| `mcap` | not null and > 0 |
+| `address` | token contract address, not null |
+
+**`gecko_id` / `cmcId` alone do NOT count.** That is a deliberate choice:
+a CoinGecko / CoinMarketCap listing page can exist without a live, trading
+token, and these are weak signals on their own. They count only in
+combination with a symbol or mcap — which is already covered by the strong
+checks above, so in practice they never change the outcome. In this pull,
+12 protocols have *only* a `gecko_id`/`cmcId` and no strong signal; they were
+**not** excluded for that reason (recorded in `dossier.json` as
+`gecko_cmc_id_only_not_excluded: 12`). If the judge's sealed snapshot treats
+`gecko_id`/`cmcId` alone as token evidence, a few rows could differ.
+
+**Consequence / limitation:** token status reflects **DefiLlama fields only**.
+A protocol can have a token elsewhere that DefiLlama does not record (for
+example an entry whose description mentions a token, or a token launched
+after the pull). No independent token search was done, and no token launch,
+airdrop date, or points programme was invented for any row.
+
+## 3. Eligibility pipeline (sequential, first match wins)
+
+Each protocol is tested in this order and counted once, under the first rule
+it fails. Counts are in `dossier.json` → `excludedCounts`.
+
+| # | Rule | Excluded in this pull |
+|---|---|---|
+| 1 | `already_tokenized` — strong token evidence (§2) | 4,705 |
+| 2 | `no_usable_tvl` — `tvl` null, zero, or not a number | 1,768 |
+| 3 | `tvl_lt_1m` — TVL < $1,000,000 | 2,077 |
+| 4 | `excluded_category` — category in {CEX, Bridge, Canonical Bridge, Cross Chain Bridge, Liquid Staking, Liquid Restaking, Reserve Currency, Stablecoin Wrapper, Dual-Token Stablecoin, Restaked BTC, Decentralized BTC, Anchor BTC} | 185 |
+| 5 | `wrapped_or_staked_name` — name or slug contains `wrapped`, `wst`, `steth`, `staked`, `lst`, or `liquid staking` (case-insensitive) | 0 |
+| 5a | `stablecoin_product` — name/slug matches `stablecoin`, `thUSD`, `YUSD`, `avUSD`, `USDCx`, `USDdw`, `ftUSD`, `USDh`, or `USDM` | 8 |
+| 5b | `wrapped_btc_product` — name/slug matches `btc staking`, `lightning network`, `chain fusion`, `gtbtc`, `ybtc`, `dtao`, or `bittensor` | 3 |
+| 5c | `manual_review_exclusion` — slug `usdd` (USDD is itself a stablecoin token that trades, but DefiLlama records no symbol/mcap/address for the protocol row) | 1 |
+| 6 | `parent_has_token` — `parentProtocolSlug` (or the slug after `#` in `parentProtocol`) belongs to a tokenized protocol | 0 |
+| 7 | `description_wrapped_or_staked` — description matches `wrapped` / `staked version` / `liquid staking token` | 0 |
+
+- **Eligible after all filters: 353.** The board keeps the **top 150 by TVL**
+  (minimum TVL on the board: $8,548,148).
+- **Cleanup pass (2026-11-24, after the first build):** the first board
+  still contained stablecoins (USDD, thUSD/YUSD/avUSD products), wrapped-BTC
+  products (Bittensor dTAO, GTBTC, Lightning Network, Chain Fusion) and a
+  cross-chain bridge (Circle Gateway) that the original exact-category list
+  had missed. Rules 4, 5a, 5b and 5c above were added for exactly those
+  cases and the builder was re-run on the same saved pull
+  (`data/raw_full.json`, fetched 2026-11-24T12:30:40Z), so the board is still
+  reproducible from the same snapshot. The re-run removed 28 rows and
+  backfilled the board with the next eligible protocols by TVL; the new
+  top 10 is in §7.
+- **CEXs and bridges excluded even when no-token — judgement call:** they are
+  not launchable DeFi protocols in the usual sense (a centralised exchange or
+  a bridge rarely launches a governance token in the way a DeFi protocol
+  does), so they are out regardless of token status. This is a judgement
+  call, documented here rather than hidden in the code.
+- The wrapped/staked name check is a substring match, so it can in principle
+  catch innocent names; in this pull it caught 0 protocols after the
+  earlier filters (the one it caught in the first build was re-caught by
+  the wider category list in the re-run).
+
+## 4. Ranking — comparables method
+
+For each category, the **comparables** are tokenized protocols in that same
+category with a symbol **and** `mcap > 0` and TVL ≥ $1m. For those, compute
+`ratio = mcap / TVL`, then the **median, p25 and p75** of the ratio
+(percentiles by linear interpolation).
+
+- **Category median ratio** is the FDV/TVL proxy. It is stated clearly here
+  and in every row's `impliedValueMethod`: **this is a market-cap/TVL proxy,
+  not true FDV/TVL**, because DefiLlama reports market cap, not fully
+  diluted valuation, and mcap can be stale or missing for some comparables.
+- **Fallback:** if a category has **fewer than 3 comparables**, the **global**
+  median ratio is used instead (global: n=202, median 0.255, p25 0.048,
+  p75 1.511). This avoids absurd medians from n=1 categories (e.g. Risk
+  Curators has a single comparable with ratio 3.212; Farm's single comparable
+  has ratio 12.823). Fallback categories are flagged with
+  `"source": "global-fallback"` in `dossier.json` → `categoryComparables`
+  (which also records the true category n as `categoryNComparables`).
+- **Formula** (per row, also spelled out in `impliedValueMethod`):
+
+```
+effectiveRatio = min(categoryMedianRatio, categoryP75 × 1.5)
+impliedValueUsd = TVL × effectiveRatio
+if change_7d < -20% OR (audits == "0" AND no audit_links):
+    impliedValueUsd ×= 0.85        # haircut; reason named in the method string
+impliedValueUsd = min(impliedValueUsd, $5,000,000,000)
+```
+
+- The ratio cap (p75 × 1.5) and the $5bn cap stop a single rich category or a
+  giant TVL from producing a fantasy valuation. The 0.85 haircut applies to
+  90 of the 150 rows (mostly unaudited protocols: `audits == "0"` with no
+  `audit_links`).
+- **Sort:** final board is sorted by `impliedValueUsd` descending, rank 1..150.
+  TVL-descending order is *not* required and is *not* the ranking.
+
+### Category median ratios used (board categories)
+
+| Category | n comparables | Median | p25 | p75 | Source |
+|---|---|---|---|---|---|
+| Basis Trading | 7 | 0.585 | 0.257 | 1.082 | category |
+| CDP | 9 | 0.167 | 0.034 | 0.299 | category |
+| Derivatives | 8 | 1.396 | 0.356 | 2.276 | category |
+| Dexs | 25 | 0.380 | 0.068 | 1.528 | category |
+| Indexes | 3 | 0.155 | 0.103 | 1.018 | category |
+| Lending | 21 | 0.135 | 0.023 | 0.430 | category |
+| Liquidity Manager | 3 | 0.017 | 0.015 | 11.329 | category |
+| Onchain Capital Allocator | 4 | 0.075 | 0.019 | 0.599 | category |
+| Prediction Market | 3 | 2.072 | 1.631 | 3.301 | category |
+| RWA | 10 | 0.334 | 0.093 | 0.876 | category |
+| Yield | 18 | 0.152 | 0.034 | 0.538 | category |
+| Yield Aggregator | 6 | 0.065 | 0.031 | 0.212 | category |
+| All other board categories | — | 0.255 | 0.048 | 1.511 | global fallback (category n < 3) |
+
+Global comparables overall: n=202, median 0.255, p25 0.048, p75 1.511.
+
+## 5. Confidence (0–1)
+
+Deterministic score, clamped to [0.30, 0.95], starting at 0.50:
+
+- +0.20 if ≥ 10 comparables, +0.10 if 5–9, +0 if fewer;
+- +0.10 if TVL ≥ $100m, +0.05 if TVL ≥ $10m;
+- +0.10 if 7d TVL change is between −10% and +10% (stable);
+- −0.05 if the 0.85 haircut was applied.
+
+`confidenceReason` on each row names the components. Confidence is about
+*how much evidence supports the estimate*, not a probability that a token
+launches.
+
+## 6. Row contents
+
+Each row of `board.json` has: `rank`, `slug`, `name`, `category`,
+`chains` (top 5), `tvlUsd` (rounded), `tvlChange7d` (if present),
+`impliedValueUsd` (rounded), `impliedValueMethod`, `comparables` (3–5
+tokenized protocols in the same category, chosen by closest TVL on a log
+scale, with their mcap, TVL and ratio; filled from the global pool only if
+fewer than 3 same-category comparables exist), `categoryMedianRatio`,
+`confidence`, `confidenceReason`, `farmPlan`, `website`, `twitter`
+(if present), `defillamaUrl` (`https://defillama.com/protocol/<slug>`),
+`tokenStatus: "no-token"`, `source`, `fetchedAt`. No row carries a token
+symbol.
+
+### Farm plans
+
+`farmPlan` = `{steps (5–6 concrete steps, tailored to the category/product),
+pointsOrRewards, risks (3–4 items), estimatedCostUsd, estimatedTimeMin}`.
+Steps are **generic, category-tailored usage steps** (e.g. for Lending:
+supply collateral, optionally borrow at a safe health factor, monitor it;
+for Dexs: test swap, then LP). Where a step is generic (e.g. "use the app
+weekly"), it says so in the step text.
+
+`pointsOrRewards` **never** asserts a programme exists. Every row states:
+*"No confirmed airdrop or points programme in the DefiLlama data for this
+protocol"* followed by what to watch for if one is announced. No airdrop
+dates, point programmes, or valuations beyond the comparables formula were
+invented.
+
+`estimatedCostUsd` / `estimatedTimeMin` are rough active-time and gas/fee
+estimates per category ($20–$60 / 45–90 min), not quotes.
+
+## 7. Verification (2026-11-24)
+
+- `python3 -m json.tool board.json` and `dossier.json`: valid JSON.
+- Board rows: **150** (≥ 120 required). No duplicate slugs. Ranks 1..150,
+  sorted by `impliedValueUsd` descending.
+- Every row: `impliedValueUsd > 0`, `farmPlan.steps ≥ 4` (min 5), all
+  required fields present, `tokenStatus == "no-token"`, no `symbol` field,
+  TVL ≥ $1m (min $8,548,148), 3–5 comparables per row.
+- Top 10 by implied value (after the §3 cleanup re-run): Polymarket
+  International ($651m), Sentora Curator ($574m), Gauntlet ($342m),
+  RocketSwap Anubis V2 ($128m), Extended Perps ($108m), Veda ($106m),
+  BitFi Basis ($106m), Nonce Capital ($100m), OnRe ($97m),
+  Arcus Perps ($68m). Total board TVL $14.87bn, total implied value $3.86bn.
+
+## 8. Limitations (also in `dossier.json`)
+
+1. Fresh pull, not the kit's sealed snapshot; `vendor/makefun-board.ts` missing.
+2. mcap/TVL is a proxy for FDV/TVL (DefiLlama reports mcap, not FDV).
+3. Token status is DefiLlama fields only; tokens recorded elsewhere are missed.
+4. `gecko_id`/`cmcId` alone not treated as token evidence (12 protocols).
+5. Categories with < 3 comparables use the blunt global median (0.255).
+6. Farm plans are generic usage steps; no airdrop or points programme is confirmed.
+7. TVL, mcap and 7d change are a single snapshot (2026-11-24T12:30:40Z) and move daily.
+8. Some top rows are institutional-only products (e.g. risk curators / vault
+   allocators, 25 + 19 rows) whose "launch value" is inherently speculative
+   — they are kept because the stated rules keep them, and the reader
+   should weigh that. Stablecoins, wrapped-BTC products and cross-chain
+   bridges were removed in the §3 cleanup pass, so no stablecoin or
+   wrapped-BTC row remains on the board.
