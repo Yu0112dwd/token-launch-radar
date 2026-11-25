@@ -1,5 +1,9 @@
 # Token Launch Radar — make.fun bounty token-radar-01
 
+[![make.fun](https://make.fun/badge/token-radar-01.svg)](https://make.fun/bounty/token-radar-01)
+[![rank](https://make.fun/badge/token-radar-01/Yu0112dwd/token-launch-radar/rank.svg)](https://make.fun/bounty/token-radar-01)
+[![reward](https://make.fun/badge/token-radar-01/Yu0112dwd/token-launch-radar/reward.svg)](https://make.fun/bounty/token-radar-01)
+
 **Bounty:** "Build the best token launch radar" (`token-radar-01`) — $1,325 total
 (1st $1,000, 2nd–5th $50 each, 6th–10th $25 each).
 **Deadline:** 2026-12-14 10:00 UTC / 19:00 JST. **Started:** 2026-11-14.
